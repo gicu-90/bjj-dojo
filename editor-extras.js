@@ -76,8 +76,15 @@
       origSave.addEventListener('click', () => setTimeout(pushHistory, 100));
     }
     // Snapshot + mark dirty when gizmo finishes dragging (debounced)
-    document.addEventListener('pointerup', () => {
+    document.addEventListener('pointerup', (e) => {
       if (window.BJJ.editIsActive && window.BJJ.editIsActive()) {
+        // Skip pointerups that land on the step panel. markDirty() fires the
+        // onDirtyChange listener, which calls renderStepPanel() — that rebuilds
+        // the panel's innerHTML, destroying the very button being clicked
+        // before its `click` event can fire (mousedown lands on the old
+        // button, mouseup on the rebuilt panel → no click). The step panel
+        // never edits a pose, so it can never legitimately make a step dirty.
+        if (e.target && e.target.closest && e.target.closest('#stepPanel')) return;
         setTimeout(pushHistory, 80);
         // Mark current step dirty
         if (window.PoseStore && window.BJJ.editGetActiveMove

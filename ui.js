@@ -493,7 +493,9 @@
       panel.style.height = newH + 'px';
       panel.style.maxHeight = newH + 'px';
       // Toggle expanded class for any style sync
-      panel.classList.toggle('expanded', newH > window.innerHeight * 0.65);
+      const expanded = newH > window.innerHeight * 0.65;
+      panel.classList.toggle('expanded', expanded);
+      document.body.classList.toggle('edit-expanded', expanded);
     }
     function onEnd() {
       if (!dragging) return;
@@ -504,6 +506,7 @@
         panel.style.height = '85vh';
         panel.style.maxHeight = '85vh';
         panel.classList.add('expanded');
+        document.body.classList.add('edit-expanded');
       } else if (h < window.innerHeight * 0.35) {
         // Swipe down far enough → close
         window.BJJ.setEditMode(false);
@@ -514,6 +517,7 @@
         panel.style.height = '55vh';
         panel.style.maxHeight = '55vh';
         panel.classList.remove('expanded');
+        document.body.classList.remove('edit-expanded');
       }
     }
     panel.addEventListener('touchstart', onStart, { passive: false });

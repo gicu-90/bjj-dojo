@@ -482,6 +482,16 @@
     padding: 12px;
   }
   .edit-panel.open { right: 18px; }
+  /* When the pose editor is open on desktop, slide the step panel left so it
+     clears the editor panel docked on the right — otherwise the editor
+     (z-index 40) covers the step panel's "Next ▶" button (z-index 9),
+     making it unclickable. Scoped to >=641px so mobile keeps its own layout. */
+  @media (min-width: 641px) {
+    body.edit-open .stepPanel {
+      left: calc((100vw - 338px) / 2);
+      width: min(560px, calc(100vw - 386px));
+    }
+  }
   .ep-head {
     display: flex; justify-content: space-between; align-items: center;
     padding-bottom: 8px;
@@ -720,8 +730,8 @@
       min-height: 48px;
     }
     /* Step panel doesn't conflict — sits ABOVE the sheet when both open */
-    .edit-panel.open ~ .stepPanel { bottom: calc(55vh + 8px); }
-    .edit-panel.open.expanded ~ .stepPanel { display: none; }
+    body.edit-open .stepPanel { bottom: calc(55vh + 8px); }
+    body.edit-expanded .stepPanel { display: none; }
     .settings {
       width: calc(100vw - 32px);
     }

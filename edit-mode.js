@@ -293,6 +293,12 @@
       active = on;
       const panel = document.getElementById('editPanel');
       if (panel) panel.classList.toggle('open', on);
+      // Mirror the open state onto <body> so the step panel can reposition
+      // out from under the editor. A body class is used instead of a sibling
+      // selector because .stepPanel precedes .edit-panel in the DOM, which
+      // makes the `~` general-sibling combinator never match.
+      document.body.classList.toggle('edit-open', on);
+      if (!on) document.body.classList.remove('edit-expanded');
       if (on) {
         selectJoint(activeFig, activeJoint);
       } else {

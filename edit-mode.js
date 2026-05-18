@@ -48,6 +48,16 @@
       controls.enabled = !e.value;
     });
 
+    // === IK handles — draggable spheres at hands/feet; CCD solves the limb ===
+    const ik = window.createIKHandles
+      ? window.createIKHandles(scene, camera, renderer, [attacker, opponent], controls)
+      : null;
+    // Keep the handle spheres tracking their bones every frame.
+    (function ikTick() {
+      if (ik) ik.update();
+      requestAnimationFrame(ikTick);
+    })();
+
     function setGizmoTarget() {
       if (!active) { gizmo.detach(); gizmo.visible = false; return; }
       const fig = figs[activeFig];
@@ -84,6 +94,8 @@
       if (!active) return;
       if (!controls.enabled) return;   // dragging gizmo
       if (Math.abs((e.clientX + e.clientY * 1000) - downAt) > 4) return;
+      // In IK mode a click selects an IK handle, not a body joint.
+      if (ik && ik.visible) { ik.tryPick(e.clientX, e.clientY); return; }
       const hit = pick(e);
       if (!hit) return;
       const bp = hit.object.userData.bodyPart;
@@ -197,6 +209,22 @@
     };
     const hideGizmoBtn = document.getElementById('epHideGizmo');
     if (hideGizmoBtn) hideGizmoBtn.onclick = () => { gizmo.visible = !gizmo.visible; };
+    // IK-drag toggle: show the hand/foot handles, park the joint gizmo while on.
+    const ikBtn = document.getElementById('epToggleIK');
+    if (ikBtn && ik) ikBtn.onclick = () => {
+      if (ik.visible) {
+        ik.hide();
+        ikBtn.classList.remove('on');
+        ikBtn.textContent = '⊕ IK drag (hands & feet)';
+        setGizmoTarget();              // restore the joint-rotation gizmo
+      } else {
+        ik.show();
+        ikBtn.classList.add('on');
+        ikBtn.textContent = '⊖ IK drag — click a sphere';
+        gizmo.detach();                // park the joint gizmo while IK is active
+        gizmo.visible = false;
+      }
+    };
     const zeroBtn = document.getElementById('epZeroJoint');
     if (zeroBtn) zeroBtn.onclick = () => {
       applyJointDeltaEuler([0, 0, 0]);
@@ -304,6 +332,10 @@
       } else {
         gizmo.detach();
         gizmo.visible = false;
+        if (ik && ik.visible) {
+          ik.hide();
+          if (ikBtn) { ikBtn.classList.remove('on'); ikBtn.textContent = '⊕ IK drag (hands & feet)'; }
+        }
       }
     }
     window.BJJ.setEditMode = setEditMode;

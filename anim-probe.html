@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Anim probe</title>
+<style>html,body{margin:0;height:100%;background:#0a0c11;color:#e8ebef;font-family:monospace}
+#log{position:fixed;top:0;left:0;right:0;padding:8px;font-size:11px;max-height:90vh;overflow:auto}
+</style></head>
+<body>
+<div id="log"></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
+<script>
+const log = m => { document.getElementById('log').innerHTML += m + '<br>'; };
+const url = new URLSearchParams(location.search).get('u') || 'uploads/Double Leg Takedown - Attacker (1).fbx';
+log('loading ' + url);
+new THREE.FBXLoader().load(url, (fbx) => {
+  log('loaded. animations: ' + fbx.animations.length);
+  fbx.animations.forEach((clip, i) => {
+    log('anim ' + i + ': name="' + clip.name + '" dur=' + clip.duration.toFixed(2) + 's tracks=' + clip.tracks.length);
+  });
+  let bones = 0;
+  fbx.traverse(o => { if (o.isBone) bones++; });
+  log('bones: ' + bones);
+  // Sample bone names
+  const names = [];
+  fbx.traverse(o => { if (o.isBone && names.length < 5) names.push(o.name); });
+  log('first bones: ' + names.join(', '));
+}, undefined, err => log('ERROR ' + err));
+</script></body></html>

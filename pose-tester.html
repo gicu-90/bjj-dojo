@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BJJ Pose Tester</title>
+<style>
+  body { margin:0; background:#0a0c11; color:#e8ebef; font-family: monospace; overflow: hidden; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); height: 100vh; gap: 1px; background: #1a1e26; }
+  .cell { background: #0a0c11; position: relative; }
+  .cell canvas { width: 100%; height: 100%; display: block; }
+  .label { position: absolute; top: 8px; left: 8px; font-size: 11px; color: #ffb74d; letter-spacing: 0.1em; }
+  .info { position: absolute; bottom: 8px; left: 8px; right: 8px; font-size: 10px; color: #8b95a3; line-height: 1.4; }
+  .controls { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); background: #14181f; border: 1px solid #2a3140; padding: 8px 12px; border-radius: 6px; z-index: 100; display: flex; gap: 6px; flex-wrap: wrap; max-width: 90vw; }
+  .controls button { background: #1c2230; border: 1px solid #2a3140; color: #e8ebef; padding: 5px 9px; border-radius: 4px; font-family: inherit; font-size: 10px; cursor: pointer; }
+  .controls button.on { background: #ffb74d; color: #1a1207; border-color: #ffb74d; }
+  .pose-name { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 14px; font-weight: bold; color: #ffb74d; background: #14181f; border: 1px solid #2a3140; padding: 8px 16px; border-radius: 6px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="controls" id="controls"></div>
+<div class="pose-name" id="poseName">—</div>
+
+<div class="grid">
+  <div class="cell"><canvas id="c-front"></canvas><div class="label">FRONT</div><div class="info" id="i-front"></div></div>
+  <div class="cell"><canvas id="c-side"></canvas><div class="label">3/4 HERO</div><div class="info" id="i-side"></div></div>
+  <div class="cell"><canvas id="c-top"></canvas><div class="label">TOP DOWN</div><div class="info" id="i-top"></div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="mannequin.js"></script>
+<script src="moves.js"></script>
+<script>
+// Pose tester. Renders ONE pose pair from 3 angles.
+
+const cams = [
+  { id: 'front', pos: [0, 1.3, 5.5], target: [0.3, 0.4, 0], label: 'FRONT' },
+  { id: 'side',  pos: [4, 1.4, 4], target: [0.3, 0.4, 0], label: '3/4' },
+  { id: 'top',   pos: [0.3, 5, 0.01], target: [0.3, 0.2, 0], label: 'TOP' },
+];
+
+const views = cams.map(cfg => {
+  const canvas = document.getElementById('c-' + cfg.id);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0a0c11');
+  const cam = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+  cam.position.set(...cfg.pos);
+  cam.lookAt(...cfg.target);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  // Lights
+  scene.add(new THREE.HemisphereLight(0x6a7888, 0x0a0c10, 0.6));
+  const key = new THREE.DirectionalLight(0xffe2b8, 1.1);
+  key.position.set(3, 6, 4);
+  scene.add(key);
+  scene.add(new THREE.DirectionalLight(0x4fc3f7, 0.4).position.set(-4, 3, -3));
+  // Mat
+  const mat = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshStandardMaterial({ color: 0x141921, roughness: 0.9 }));
+  mat.rotation.x = -Math.PI/2;
+  scene.add(mat);
+  scene.add(new THREE.GridHelper(8, 8, 0x2a3340, 0x1c2230));
+  // World axes (red=X, green=Y, blue=Z)
+  scene.add(new THREE.AxesHelper(1.2));
+  // Figures
+  const att = createMannequin({ color: 0x9ccc65, name: 'att' });
+  const opp = createMannequin({ color: 0xef5350, name: 'opp' });
+  scene.add(att.root);
+  scene.add(opp.root);
+  return { canvas, scene, cam, renderer, att, opp, cfg };
+});
+
+function resize() {
+  views.forEach(v => {
+    const w = v.canvas.clientWidth;
+    const h = v.canvas.clientHeight;
+    v.renderer.setSize(w, h, false);
+    v.cam.aspect = w / h;
+    v.cam.updateProjectionMatrix();
+  });
+}
+new ResizeObserver(resize).observe(document.body);
+resize();
+
+function applyPose(fig, pose) {
+  fig.root.position.set(...pose.rootPos);
+  fig.root.rotation.set(...pose.rootRot);
+  for (const jn in pose.joints) {
+    if (fig.joints[jn]) fig.joints[jn].rotation.set(...pose.joints[jn]);
+  }
+}
+
+// === REGISTRY OF POSES TO TEST ===
+// Each entry is a function returning [attackerPose, opponentPose] plus a description.
+
+const POSES = {
+  'rest-both': {
+    desc: 'Both at REST (default — should look like T-pose-ish standing)',
+    build: () => {
+      const REST_POSE = window.P({}, [0, window.GY, 0], [0, 0, 0]);
+      const REST_OPP = window.P({}, [1.4, window.GY, 0], [0, 0, 0]);
+      return [REST_POSE, REST_OPP];
+    },
+  },
+  'fight-stance': {
+    desc: 'Both in fight stance facing each other',
+    build: () => [window.fightStanceA(), window.fightStanceB()],
+  },
+  'closed-guard': {
+    desc: 'Att on back with knees up wrapped around opp who kneels between',
+    build: () => [window.guardClosedAttacker(), window.guardClosedOpp()],
+  },
+  'back-control': {
+    desc: 'Att behind opp, both seated, hooks in',
+    build: () => [window.backControlAtt(), window.backControlOpp()],
+  },
+  'armbar-finish': {
+    desc: 'Att lying perpendicular, legs over opp; opp face down arm extended',
+    build: () => [window.armbarFinishAtt(), window.armbarFinishOpp()],
+  },
+  'triangle-finish': {
+    desc: 'Att on back, legs locked figure-4 around opp\'s neck/arm',
+    build: () => [window.triangleFinishAtt(), window.triangleFinishOpp()],
+  },
+  'kimura-finish': {
+    desc: 'Att lies back, opp arm bent up and rotated',
+    build: () => [window.kimuraFinishAtt(), window.kimuraFinishOpp()],
+  },
+  'rnc-finish': {
+    desc: 'Att leans back with arms around opp\'s neck',
+    build: () => {
+      const m = window.MOVES.find(x => x.id === 'rnc');
+      return [m.steps[4].attacker, m.steps[4].opponent];
+    },
+  },
+  'guillotine-finish': {
+    desc: 'Att standing arched, opp head wrapped under att\'s arm',
+    build: () => {
+      const m = window.MOVES.find(x => x.id === 'guillotine');
+      return [m.steps[4].attacker, m.steps[4].opponent];
+    },
+  },
+  'doubleleg-finish': {
+    desc: 'Att on top in side control, opp on back',
+    build: () => {
+      const m = window.MOVES.find(x => x.id === 'doubleLeg');
+      return [m.steps[6].attacker, m.steps[6].opponent];
+    },
+  },
+};
+
+let activePose = 'fight-stance';
+
+function render() {
+  const def = POSES[activePose];
+  if (!def) return;
+  const [a, o] = def.build();
+  views.forEach(v => {
+    applyPose(v.att, a);
+    applyPose(v.opp, o);
+    // Force immediate render — raf may be throttled in hidden iframe
+    v.renderer.render(v.scene, v.cam);
+  });
+  document.getElementById('poseName').textContent = activePose + ' — ' + def.desc;
+  views.forEach(v => {
+    document.getElementById('i-' + v.cfg.id).innerHTML =
+      'cam ' + v.cfg.pos.map(n => n.toFixed(1)).join(',') +
+      ' → ' + v.cfg.target.map(n => n.toFixed(1)).join(',');
+  });
+}
+
+function loop() {
+  requestAnimationFrame(loop);
+  views.forEach(v => v.renderer.render(v.scene, v.cam));
+}
+loop();
+// Also keep rendering on setInterval (raf throttled when iframe hidden)
+setInterval(() => views.forEach(v => v.renderer.render(v.scene, v.cam)), 100);
+
+// Build controls
+const controlsEl = document.getElementById('controls');
+Object.keys(POSES).forEach(k => {
+  const b = document.createElement('button');
+  b.textContent = k;
+  b.dataset.k = k;
+  if (k === activePose) b.classList.add('on');
+  b.onclick = () => {
+    activePose = k;
+    controlsEl.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.k === k));
+    render();
+  };
+  controlsEl.appendChild(b);
+});
+
+render();
+
+window.POSE_TESTER = { setPose: (k) => { activePose = k; render(); }, views, POSES };
+</script>
+</body>
+</html>

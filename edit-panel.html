@@ -1,0 +1,70 @@
+<!-- Pose editor panel — slides in from the right when edit mode is on. -->
+<aside class="edit-panel" id="editPanel">
+  <div class="ep-head">
+    <h3>POSE EDITOR</h3>
+    <button class="ep-close" id="editClose" title="Close edit mode">✕</button>
+  </div>
+
+  <!-- Mode toggle: animation scrubbing vs static pose editing -->
+  <div class="ep-section">
+    <div class="ep-row">
+      <span class="ep-label">FIGURE</span>
+    </div>
+    <div class="ep-figpicker">
+      <button class="ep-fig on att" data-fig="att">YOU (blue)</button>
+      <button class="ep-fig opp" data-fig="opp">OPPONENT (red)</button>
+    </div>
+  </div>
+
+  <div class="ep-section">
+    <div class="ep-row">
+      <span class="ep-label">SELECTED</span>
+    </div>
+    <div class="ep-selected" id="epSel">Whole body</div>
+    <div class="ep-hint">Click any body part on a figure</div>
+    <div class="ep-mode-row">
+      <button class="ep-mode" id="epMoveBody">↔ Move body</button>
+      <button class="ep-mode" id="epHideGizmo">Hide gizmo</button>
+    </div>
+    <div class="ep-mode-row">
+      <button class="ep-mode on" id="epModeRot">Rotate</button>
+      <button class="ep-mode" id="epModeTr">Translate</button>
+    </div>
+  </div>
+
+  <!-- Joint delta sliders -->
+  <div class="ep-section" id="epRotSec">
+    <div class="ep-row">
+      <span class="ep-label">JOINT DELTA (RAD)</span>
+    </div>
+    <div class="ep-slider"><label>X</label><input type="range" id="epJx" min="-3.2" max="3.2" step="0.05" value="0"><span class="ep-val" id="epJxv">0.00</span></div>
+    <div class="ep-slider"><label>Y</label><input type="range" id="epJy" min="-3.2" max="3.2" step="0.05" value="0"><span class="ep-val" id="epJyv">0.00</span></div>
+    <div class="ep-slider"><label>Z</label><input type="range" id="epJz" min="-3.2" max="3.2" step="0.05" value="0"><span class="ep-val" id="epJzv">0.00</span></div>
+    <div class="ep-mode-row">
+      <button class="ep-mode" id="epZeroJoint">Reset</button>
+      <button class="ep-mode" id="epMirror">Mirror L↔R</button>
+    </div>
+  </div>
+
+  <!-- Root position sliders -->
+  <div class="ep-section" id="epPosSec" style="display:none">
+    <div class="ep-row">
+      <span class="ep-label">POSITION</span>
+    </div>
+    <div class="ep-slider"><label>X</label><input type="range" id="epRpx" min="-3" max="3" step="0.05"><span class="ep-val" id="epRpxv">0.00</span></div>
+    <div class="ep-slider"><label>Y</label><input type="range" id="epRpy" min="-2" max="2" step="0.02"><span class="ep-val" id="epRpyv">0.00</span></div>
+    <div class="ep-slider"><label>Z</label><input type="range" id="epRpz" min="-2" max="2" step="0.05"><span class="ep-val" id="epRpzv">0.00</span></div>
+  </div>
+
+  <div class="ep-section">
+    <div class="ep-row">
+      <span class="ep-label">PRESETS</span>
+    </div>
+    <div class="ep-preset-grid" id="epPresetGrid"></div>
+  </div>
+
+  <div class="ep-section">
+    <button class="ep-save" id="epSave">Save current step</button>
+    <div class="ep-hint" style="margin-top:6px">Saves pose + animation time to the current step.</div>
+  </div>
+</aside>

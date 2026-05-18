@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BJJ Pose Editor</title>
+<style>
+  :root {
+    --bg: #0a0c11; --surface: #14181f; --surface-2: #1c2230; --surface-3: #252c3b;
+    --border: #2a3140; --text: #e8ebef; --text-dim: #8b95a3;
+    --accent: #ffb74d; --you: #4fc3f7; --opp: #ef5350;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, system-ui, sans-serif; overflow: hidden; font-size: 13px; }
+  #scene { position: fixed; top: 0; left: 0; bottom: 0; right: 340px; display: block; cursor: pointer; }
+  #panel { position: fixed; right: 0; top: 0; bottom: 0; width: 340px;
+    background: var(--surface); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 12px; }
+  .row { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+  .row label { width: 14px; color: var(--text-dim); font-size: 11px; font-weight: 600; }
+  .row input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .row .val { width: 50px; text-align: right; color: var(--accent); font-size: 11px;
+    font-family: 'JetBrains Mono', monospace; }
+  .sec { border: 1px solid var(--border); border-radius: 6px; padding: 9px;
+    margin-bottom: 8px; background: var(--surface-2); }
+  .sec h3 { margin: 0 0 7px; font-size: 10px; color: var(--text-dim); letter-spacing: 0.18em;
+    text-transform: uppercase; font-weight: 600; }
+  select, button { background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 9px; border-radius: 4px; font-family: inherit; font-size: 12px; cursor: pointer; }
+  button:hover { background: var(--surface-3); }
+  button.primary { background: var(--accent); color: #1a1207; border-color: var(--accent); font-weight: 600; }
+  textarea { width: 100%; height: 90px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; resize: vertical; }
+  .figpicker { display: flex; gap: 6px; }
+  .figpicker button { flex: 1; padding: 6px; font-weight: 600; }
+  .figpicker button.on.att { background: var(--you); color: #002433; border-color: var(--you); }
+  .figpicker button.on.opp { background: var(--opp); color: #330000; border-color: var(--opp); }
+  .header { display: flex; gap: 6px; align-items: baseline; padding: 0 4px 8px;
+    border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  .header h1 { font-size: 12px; letter-spacing: 0.18em; margin: 0; }
+  .header .sub { color: var(--text-dim); font-size: 10px; }
+  .stepbar { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .stepbar button { padding: 4px 7px; font-size: 10px; }
+  .stepbar button.on { background: var(--accent); color: #1a1207; border-color: var(--accent); }
+  .cam-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .cam-row button { padding: 5px 2px; font-size: 10px; }
+  .mode-row { display: flex; gap: 4px; }
+  .mode-row button { flex: 1; padding: 5px; font-size: 10px; }
+  .mode-row button.on { background: var(--accent); color: #1a1207; border-color: var(--accent); }
+  .selected-joint { color: var(--accent); font-weight: 600; font-size: 13px; }
+  .selected-joint-hint { color: var(--text-dim); font-size: 10px; }
+  .preset-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .preset-row button { font-size: 10px; padding: 3px 6px; }
+  .hint-banner { position: fixed; left: 14px; top: 14px; font-size: 11px; color: var(--text-dim);
+    background: rgba(20,24,31,0.85); padding: 6px 10px; border-radius: 4px;
+    border: 1px solid var(--border); pointer-events: none; }
+  #fbx-loading {
+    position: fixed; inset: 0;
+    background: #0a0c11;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 1000;
+    gap: 18px;
+    font-family: -apple-system, system-ui, sans-serif;
+  }
+  #fbx-loading .logo {
+    width: 60px; height: 60px;
+    display: grid; place-items: center;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 12px;
+    font-size: 30px; font-weight: 700; color: var(--accent);
+  }
+  #fbx-loading .title {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  #fbx-loading .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text-dim);
+  }
+  #fbx-loading .bar { width: 280px; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  #fbx-loading .bar-fill {
+    height: 100%; background: var(--accent); width: 0%;
+    transition: width 0.2s;
+  }
+
+  #loading { position: fixed; inset: 0; background: #0a0c11; display: flex;
+    align-items: center; justify-content: center; color: var(--accent);
+    font-size: 14px; z-index: 100; transition: opacity 0.3s; }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="fbx-loading" style="display:flex">
+  <div class="logo">P</div>
+  <div class="title">POSE EDITOR</div>
+  <div class="label">Loading character… first time may take 30s, cached after</div>
+  <div class="bar"><div class="bar-fill"></div></div>
+</div>
+
+<canvas id="scene"></canvas>
+<div class="hint-banner">click body part to select · drag gizmo · or use sliders</div>
+<div id="loading" style="display:none">Loading 3D character...</div>
+<div id="panel">
+  <div class="header"><h1>POSE EDITOR</h1><span class="sub">BJJ Dojo · FBX</span></div>
+
+  <div class="sec">
+    <h3>Move / Step</h3>
+    <select id="moveSel"></select>
+    <div class="stepbar" id="stepBar"></div>
+    <div id="animTimeline" style="display:none; margin-top:8px">
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px">
+        <span style="font-size:10px; color:var(--text-dim); flex:1">ANIM TIME</span>
+        <span id="animTimeVal" style="font-size:10px; color:var(--accent); font-family:monospace">0.00s</span>
+      </div>
+      <input type="range" id="animTime" min="0" max="3" step="0.01" value="0" style="width:100%; accent-color:var(--accent)">
+      <button id="saveStepTime" class="primary" style="width:100%; margin-top:4px; font-size:11px">Save as Step time</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>Figure</h3>
+    <div class="figpicker">
+      <button class="on att" data-fig="att">YOU (blue)</button>
+      <button class="opp" data-fig="opp">OPPONENT (red)</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>Selected</h3>
+    <div><span class="selected-joint" id="selJoint">Whole body</span></div>
+    <div class="selected-joint-hint" id="selHint">click any body part on the figure</div>
+    <div class="mode-row" style="margin-top:8px">
+      <button class="primary" id="moveBody" style="flex:2">↔ Move whole body</button>
+      <button id="hideGizmo">Hide gizmo</button>
+    </div>
+    <div class="mode-row" style="margin-top:4px">
+      <button data-mode="rotate" class="on" id="modeRot">Rotate</button>
+      <button data-mode="translate" id="modeTr">Translate</button>
+    </div>
+  </div>
+
+  <div class="sec" id="rotSec">
+    <h3>Joint delta from rest (rad)</h3>
+    <div class="row"><label>X</label><input type="range" id="jx" min="-3.2" max="3.2" step="0.05" value="0"><span class="val" id="jxv">0.00</span></div>
+    <div class="row"><label>Y</label><input type="range" id="jy" min="-3.2" max="3.2" step="0.05" value="0"><span class="val" id="jyv">0.00</span></div>
+    <div class="row"><label>Z</label><input type="range" id="jz" min="-3.2" max="3.2" step="0.05" value="0"><span class="val" id="jzv">0.00</span></div>
+    <div class="row" style="margin-top:6px">
+      <button id="zeroJoint">Reset to rest</button>
+      <button id="mirror">Mirror L↔R</button>
+    </div>
+  </div>
+
+  <div class="sec" id="posSec" style="display:none">
+    <h3>Root position</h3>
+    <div class="row"><label>X</label><input type="range" id="rpx" min="-3" max="3" step="0.05"><span class="val" id="rpxv"></span></div>
+    <div class="row"><label>Y</label><input type="range" id="rpy" min="-2" max="2" step="0.02"><span class="val" id="rpyv"></span></div>
+    <div class="row"><label>Z</label><input type="range" id="rpz" min="-2" max="2" step="0.05"><span class="val" id="rpzv"></span></div>
+    <h3 style="margin-top:8px">Root rotation</h3>
+    <div class="row"><label>X</label><input type="range" id="rrx" min="-3.2" max="3.2" step="0.05"><span class="val" id="rrxv"></span></div>
+    <div class="row"><label>Y</label><input type="range" id="rry" min="-3.2" max="3.2" step="0.05"><span class="val" id="rryv"></span></div>
+    <div class="row"><label>Z</label><input type="range" id="rrz" min="-3.2" max="3.2" step="0.05"><span class="val" id="rrzv"></span></div>
+    <div class="preset-row">
+      <button data-preset="standF">stand →+X</button>
+      <button data-preset="standB">stand →-X</button>
+      <button data-preset="backNX">on back, head-X</button>
+      <button data-preset="downNX">face-down, head-X</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>Camera</h3>
+    <div class="cam-row">
+      <button data-cam="default">3/4</button>
+      <button data-cam="front">Front</button>
+      <button data-cam="side">Side</button>
+      <button data-cam="top">Top</button>
+      <button data-cam="back">Back</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>Pose presets</h3>
+    <div id="presetGrid" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;"></div>
+    <div style="margin-top:6px; font-size:10px; color: var(--text-dim)">Applies to selected figure only.</div>
+  </div>
+
+  <div class="sec">
+    <h3>IK handles (drag hands/feet)</h3>
+    <div style="display:flex; gap:6px">
+      <button class="primary" id="toggleIK" style="flex:1">⊕ Show IK handles</button>
+    </div>
+    <div style="margin-top:6px; font-size:10px; color: var(--text-dim)">
+      Drag cyan spheres at hands → arm follows. Orange spheres at feet → leg follows.
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>Save</h3>
+    <button class="primary" id="saveBtn" style="width:100%">Save to current step</button>
+    <textarea id="poseCode" readonly style="margin-top:6px"></textarea>
+    <div class="row" style="margin-top:6px">
+      <button id="copyCode">Copy code</button>
+      <button id="logBoth">Log both poses</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
+<script src="mannequin.js"></script>
+<script src="moves.js"></script>
+<script src="animation-loader.js"></script>
+<script src="ik-handles.js"></script>
+<script>
+(async function () {
+  const canvas = document.getElementById('scene');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0a0c11');
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+
+  function resize() {
+    const w = Math.max(100, window.innerWidth - 340);
+    const h = window.innerHeight;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize); resize();
+
+  scene.add(new THREE.HemisphereLight(0x6a7888, 0x0a0c10, 0.55));
+  const key = new THREE.DirectionalLight(0xffe2b8, 1.1);
+  key.position.set(3, 6, 4); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x4fc3f7, 0.45);
+  rim.position.set(-4, 3, -3); scene.add(rim);
+
+  const matMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(8, 8),
+    new THREE.MeshStandardMaterial({ color: 0x141921, roughness: 0.9 }));
+  matMesh.rotation.x = -Math.PI / 2; scene.add(matMesh);
+  scene.add(new THREE.GridHelper(8, 8, 0x2a3340, 0x1c2230));
+  scene.add(new THREE.AxesHelper(0.6));
+
+  // Load figures (async)
+  const att = await createMannequin({ color: 0x4fc3f7, name: 'att' });
+  const opp = await createMannequin({ color: 0xef5350, name: 'opp' });
+  scene.add(att.root); scene.add(opp.root);
+  document.getElementById('loading').classList.add('hidden');
+
+  const orbit = new THREE.OrbitControls(camera, canvas);
+  orbit.enableDamping = true; orbit.dampingFactor = 0.1;
+
+  // === IK handles (after orbit) ===
+  const ik = createIKHandles(scene, camera, renderer, [att, opp], orbit);
+  ik.onChange(() => {
+    if (!ik.activeHandle) return;
+    const h = ik.activeHandle;
+    const figName = h.userData.fig === att ? 'att' : 'opp';
+    h.userData.chain.forEach((b) => {
+      const key = Object.keys(figs[figName].joints).find(
+        (k) => figs[figName].joints[k] === b
+      );
+      if (key) {
+        const q = b.quaternion;
+        live[figName].bones[key] = [q.x, q.y, q.z, q.w];
+      }
+    });
+    updateCode();
+  });
+  const presets = {
+    default: { pos: [3, 2, 3], target: [0.4, 0.9, 0] },
+    front:   { pos: [0, 0.9, 4], target: [0.4, 0.9, 0] },
+    side:    { pos: [4, 0.9, 0.01], target: [0.4, 0.9, 0] },
+    top:     { pos: [0.4, 4.5, 0.01], target: [0.4, 0.2, 0] },
+    back:    { pos: [0, 0.9, -4], target: [0.4, 0.9, 0] },
+  };
+  function setCam(name) {
+    const p = presets[name] || presets.default;
+    camera.position.set(...p.pos);
+    orbit.target.set(...p.target);
+    orbit.update();
+  }
+  setCam('default');
+
+  const gizmo = new THREE.TransformControls(camera, renderer.domElement);
+  gizmo.size = 0.7; scene.add(gizmo);
+  gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; });
+  gizmo.addEventListener('change', () => {
+    syncFromGizmo();
+    updateCode();
+  });
+
+  // === Body part → joint mapping ===
+  const partToJoint = {
+    head: 'head', neck: 'neck', chest: 'chest', abdomen: 'spine', hip: 'root',
+    upperArmL: 'shoulderL', forearmL: 'elbowL', handL: 'wristL',
+    upperArmR: 'shoulderR', forearmR: 'elbowR', handR: 'wristR',
+    thighL: 'hipL', shinL: 'kneeL', footL: 'ankleL',
+    thighR: 'hipR', shinR: 'kneeR', footR: 'ankleR',
+  };
+  const friendly = {
+    root: 'Whole body', spine: 'Lower back', chest: 'Upper back',
+    neck: 'Neck', head: 'Head',
+    shoulderL: 'Left shoulder', elbowL: 'Left elbow', wristL: 'Left wrist',
+    shoulderR: 'Right shoulder', elbowR: 'Right elbow', wristR: 'Right wrist',
+    hipL: 'Left hip', kneeL: 'Left knee', ankleL: 'Left ankle',
+    hipR: 'Right hip', kneeR: 'Right knee', ankleR: 'Right ankle',
+  };
+
+  // === Editor state ===
+  const figs = { att, opp };
+  let activeFig = 'att';
+  let activeJoint = 'root';
+  let activeMoveId = 'doubleLeg';
+  let activeStep = 0;
+  let gizmoMode = 'rotate';
+
+  // Internal pose state: per-figure root pos/rot + per-bone quaternion.
+  const live = {
+    att: { rootPos: [-0.85, 0, 0], rootRot: [0, Math.PI/2, 0], bones: {} },
+    opp: { rootPos: [0.85, 0, 0],  rootRot: [0, -Math.PI/2, 0], bones: {} },
+  };
+
+  function applyLive() {
+    for (const fname of ['att', 'opp']) {
+      const f = figs[fname], p = live[fname];
+      f.root.position.set(p.rootPos[0], p.rootPos[1], p.rootPos[2]);
+      f.root.rotation.set(p.rootRot[0], p.rootRot[1], p.rootRot[2]);
+      // Apply bone quaternions: rest * delta or absolute (we store final)
+      for (const k in f.joints) {
+        if (k === 'root') continue;
+        const b = f.joints[k];
+        if (p.bones[k]) {
+          const q = p.bones[k];
+          b.quaternion.set(q[0], q[1], q[2], q[3]);
+        } else if (f.restPose[k]) {
+          const rq = f.restPose[k].quaternion;
+          b.quaternion.set(rq[0], rq[1], rq[2], rq[3]);
+        }
+      }
+    }
+    updateCode();
+  }
+
+  function setGizmoTarget() {
+    const fig = figs[activeFig];
+    const target = activeJoint === 'root' ? fig.root : fig.joints[activeJoint];
+    if (target) {
+      gizmo.attach(target);
+      if (activeJoint === 'root' && gizmoMode === 'translate') gizmo.setMode('translate');
+      else gizmo.setMode('rotate');
+      gizmo.visible = true;
+    } else {
+      gizmo.detach();
+    }
+  }
+
+  function syncFromGizmo() {
+    const fig = figs[activeFig];
+    if (activeJoint === 'root') {
+      live[activeFig].rootPos = fig.root.position.toArray();
+      live[activeFig].rootRot = [fig.root.rotation.x, fig.root.rotation.y, fig.root.rotation.z];
+    } else if (fig.joints[activeJoint]) {
+      const q = fig.joints[activeJoint].quaternion;
+      live[activeFig].bones[activeJoint] = [q.x, q.y, q.z, q.w];
+    }
+    updateAllSliders();
+  }
+
+  // Compute delta euler = bone.quaternion relative to rest.
+  function getJointDeltaEuler() {
+    const fig = figs[activeFig];
+    if (activeJoint === 'root' || !fig.joints[activeJoint] || !fig.restPose[activeJoint]) {
+      return [0, 0, 0];
+    }
+    const rq = fig.restPose[activeJoint].quaternion;
+    const qRest = new THREE.Quaternion(rq[0], rq[1], rq[2], rq[3]);
+    const qCur = fig.joints[activeJoint].quaternion.clone();
+    const qDelta = qRest.clone().invert().multiply(qCur);
+    const e = new THREE.Euler().setFromQuaternion(qDelta, 'XYZ');
+    return [e.x, e.y, e.z];
+  }
+  function applyJointDeltaEuler(eulerXYZ) {
+    const fig = figs[activeFig];
+    if (activeJoint === 'root' || !fig.joints[activeJoint] || !fig.restPose[activeJoint]) return;
+    const rq = fig.restPose[activeJoint].quaternion;
+    const qRest = new THREE.Quaternion(rq[0], rq[1], rq[2], rq[3]);
+    const qDelta = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(eulerXYZ[0], eulerXYZ[1], eulerXYZ[2], 'XYZ'));
+    const qFinal = qRest.clone().multiply(qDelta);
+    fig.joints[activeJoint].quaternion.copy(qFinal);
+    live[activeFig].bones[activeJoint] = [qFinal.x, qFinal.y, qFinal.z, qFinal.w];
+  }
+
+  // === UI ===
+  const moveSel = document.getElementById('moveSel');
+  window.MOVES.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id; opt.textContent = m.name;
+    moveSel.appendChild(opt);
+  });
+  moveSel.onchange = () => { activeMoveId = moveSel.value; activeStep = 0; buildStepBar(); loadCurrentStep(); };
+  function buildStepBar() {
+    const bar = document.getElementById('stepBar'); bar.innerHTML = '';
+    const m = window.MOVES.find(x => x.id === activeMoveId);
+    m.steps.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.textContent = (i + 1);
+      if (i === activeStep) b.classList.add('on');
+      b.onclick = () => {
+        activeStep = i; buildStepBar();
+        if (animMode && animActiveMove) {
+          const t = (animActiveMove.animations.stepTimes && animActiveMove.animations.stepTimes[i]) || 0;
+          animTimeSlider.value = t;
+          animTimeValEl.textContent = t.toFixed(2) + 's';
+          attPlayer.setTime(t);
+          oppPlayer.setTime(t);
+        } else {
+          loadCurrentStep();
+        }
+      };
+      bar.appendChild(b);
+    });
+  }
+  // Animation players (one per figure) — used when the move has animations.
+  const attPlayer = window.AnimLoader.createPlayer(att);
+  const oppPlayer = window.AnimLoader.createPlayer(opp);
+  let animMode = false;
+  let animActiveMove = null;
+  const animTimelineEl = document.getElementById('animTimeline');
+  const animTimeSlider = document.getElementById('animTime');
+  const animTimeValEl = document.getElementById('animTimeVal');
+
+  async function loadAnimForMove(m) {
+    if (!m.animations) {
+      animMode = false;
+      animActiveMove = null;
+      animTimelineEl.style.display = 'none';
+      return;
+    }
+    try {
+      const [a, o] = await Promise.all([
+        window.AnimLoader.loadAnim(m.animations.attUrl),
+        window.AnimLoader.loadAnim(m.animations.oppUrl),
+      ]);
+      attPlayer.setClip(a);
+      oppPlayer.setClip(o);
+      // Position roots at animation start
+      if (m.animations.startPos) {
+        att.root.position.set(...m.animations.startPos.att);
+        opp.root.position.set(...m.animations.startPos.opp);
+      }
+      if (m.animations.startRot) {
+        att.root.rotation.set(...m.animations.startRot.att);
+        opp.root.rotation.set(...m.animations.startRot.opp);
+      }
+      animMode = true;
+      animActiveMove = m;
+      animTimelineEl.style.display = 'block';
+      animTimeSlider.max = m.animations.duration || 3;
+      // Jump to current step time
+      const t = (m.animations.stepTimes && m.animations.stepTimes[activeStep]) || 0;
+      animTimeSlider.value = t;
+      animTimeValEl.textContent = t.toFixed(2) + 's';
+      attPlayer.setTime(t);
+      oppPlayer.setTime(t);
+    } catch (e) {
+      console.warn('Anim load failed:', e);
+      animMode = false;
+      animTimelineEl.style.display = 'none';
+    }
+  }
+
+  animTimeSlider.addEventListener('input', () => {
+    const t = parseFloat(animTimeSlider.value);
+    animTimeValEl.textContent = t.toFixed(2) + 's';
+    if (animMode) {
+      attPlayer.setTime(t);
+      oppPlayer.setTime(t);
+    }
+  });
+  document.getElementById('saveStepTime').onclick = () => {
+    if (!animMode || !animActiveMove) return;
+    const t = parseFloat(animTimeSlider.value);
+    animActiveMove.animations.stepTimes[activeStep] = t;
+    const btn = document.getElementById('saveStepTime');
+    btn.textContent = 'Saved at ' + t.toFixed(2) + 's ✓';
+    setTimeout(() => btn.textContent = 'Save as Step time', 1500);
+  };
+
+  function loadCurrentStep() {
+    const m = window.MOVES.find(x => x.id === activeMoveId);
+    const s = m.steps[activeStep];
+    if (m.animations) {
+      // Animation mode — load the clip + jump to step time.
+      loadAnimForMove(m);
+      return;
+    }
+    animMode = false;
+    animTimelineEl.style.display = 'none';
+    function loadPose(figName, srcPose) {
+      live[figName].rootPos = srcPose.rootPos.slice();
+      live[figName].rootRot = srcPose.rootRot.slice();
+      live[figName].rootPos[1] = 0;
+      live[figName].bones = {};
+      if (srcPose.bones) {
+        for (const k in srcPose.bones) live[figName].bones[k] = srcPose.bones[k].slice();
+      }
+    }
+    loadPose('att', s.attacker);
+    loadPose('opp', s.opponent);
+    applyLive();
+    selectJoint(activeFig, activeJoint);
+  }
+
+  document.querySelectorAll('.figpicker button').forEach(b => {
+    b.onclick = () => {
+      activeFig = b.dataset.fig;
+      document.querySelectorAll('.figpicker button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      setGizmoTarget();
+      updateAllSliders();
+    };
+  });
+
+  document.getElementById('modeRot').onclick = () => {
+    gizmoMode = 'rotate';
+    document.getElementById('modeRot').classList.add('on');
+    document.getElementById('modeTr').classList.remove('on');
+    setGizmoTarget();
+  };
+  document.getElementById('modeTr').onclick = () => {
+    gizmoMode = 'translate';
+    document.getElementById('modeTr').classList.add('on');
+    document.getElementById('modeRot').classList.remove('on');
+    setGizmoTarget();
+  };
+  document.getElementById('hideGizmo').onclick = () => { gizmo.visible = !gizmo.visible; };
+  document.getElementById('moveBody').onclick = () => {
+    gizmoMode = 'translate';
+    selectJoint(activeFig, 'root');
+  };
+
+  // Sliders
+  function bindRoot(id, valId, idx, isRot) {
+    const inp = document.getElementById(id), out = document.getElementById(valId);
+    inp.addEventListener('input', () => {
+      if (isRot) live[activeFig].rootRot[idx] = parseFloat(inp.value);
+      else live[activeFig].rootPos[idx] = parseFloat(inp.value);
+      applyLive();
+      out.textContent = (+inp.value).toFixed(2);
+    });
+    return () => {
+      const v = (isRot ? live[activeFig].rootRot : live[activeFig].rootPos)[idx];
+      inp.value = v; out.textContent = v.toFixed(2);
+    };
+  }
+  const updateRpx = bindRoot('rpx','rpxv',0,false);
+  const updateRpy = bindRoot('rpy','rpyv',1,false);
+  const updateRpz = bindRoot('rpz','rpzv',2,false);
+  const updateRrx = bindRoot('rrx','rrxv',0,true);
+  const updateRry = bindRoot('rry','rryv',1,true);
+  const updateRrz = bindRoot('rrz','rrzv',2,true);
+
+  // Joint delta sliders
+  function bindDelta(id, valId, idx) {
+    const inp = document.getElementById(id), out = document.getElementById(valId);
+    inp.addEventListener('input', () => {
+      const e = getJointDeltaEuler();
+      e[idx] = parseFloat(inp.value);
+      applyJointDeltaEuler(e);
+      out.textContent = (+inp.value).toFixed(2);
+    });
+    return () => {
+      const e = getJointDeltaEuler();
+      inp.value = e[idx]; out.textContent = e[idx].toFixed(2);
+    };
+  }
+  const updateJx = bindDelta('jx','jxv',0);
+  const updateJy = bindDelta('jy','jyv',1);
+  const updateJz = bindDelta('jz','jzv',2);
+
+  function updateAllSliders() {
+    updateRpx(); updateRpy(); updateRpz();
+    updateRrx(); updateRry(); updateRrz();
+    updateJx(); updateJy(); updateJz();
+  }
+
+  const ROTS = {
+    standF: [0, Math.PI/2, 0], standB: [0, -Math.PI/2, 0],
+    backNX: [-Math.PI/2, 0, Math.PI/2], downNX: [Math.PI/2, 0, Math.PI/2],
+  };
+  document.querySelectorAll('[data-preset]').forEach(b => {
+    b.onclick = () => {
+      live[activeFig].rootRot = ROTS[b.dataset.preset].slice();
+      applyLive(); updateAllSliders();
+    };
+  });
+  document.querySelectorAll('.cam-row button').forEach(b => {
+    b.onclick = () => setCam(b.dataset.cam);
+  });
+
+  document.getElementById('zeroJoint').onclick = () => {
+    if (activeJoint === 'root') return;
+    delete live[activeFig].bones[activeJoint];
+    applyLive();
+    updateAllSliders();
+  };
+  document.getElementById('mirror').onclick = () => {
+    if (activeJoint === 'root') return;
+    let other = null;
+    if (activeJoint.endsWith('L')) other = activeJoint.slice(0,-1)+'R';
+    else if (activeJoint.endsWith('R')) other = activeJoint.slice(0,-1)+'L';
+    if (!other || !figs[activeFig].joints[other]) return;
+    // Mirror = invert Y and Z of the delta
+    const e = getJointDeltaEuler();
+    // swap to other joint and apply mirrored delta
+    const tmpActive = activeJoint;
+    activeJoint = other;
+    applyJointDeltaEuler([e[0], -e[1], -e[2]]);
+    activeJoint = tmpActive;
+    applyLive();
+  };
+
+  // === Click body part → select joint ===
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function getHit(e) {
+    const rect = canvas.getBoundingClientRect();
+    ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    return raycaster.intersectObjects([...att.parts, ...opp.parts], false)[0] || null;
+  }
+  let downAt = 0;
+  canvas.addEventListener('pointerdown', e => { downAt = e.clientX + e.clientY * 1000; });
+  canvas.addEventListener('pointerup', e => {
+    if (!orbit.enabled) return;
+    const upAt = e.clientX + e.clientY * 1000;
+    if (Math.abs(upAt - downAt) > 4) return;
+    // First try IK handle pick (if visible)
+    if (ik.visible && ik.tryPick(e.clientX, e.clientY)) return;
+    const hit = getHit(e);
+    if (!hit) return;
+    const bp = hit.object.userData.bodyPart;
+    const figName = hit.object.userData.figureName;
+    selectJoint(figName, partToJoint[bp] || 'root');
+  });
+
+  function selectJoint(figName, joint) {
+    activeFig = figName;
+    activeJoint = joint;
+    document.querySelectorAll('.figpicker button').forEach(x =>
+      x.classList.toggle('on', x.dataset.fig === figName));
+    document.getElementById('selJoint').textContent = friendly[joint] || joint;
+    document.getElementById('selHint').textContent =
+      joint === 'root' ? 'Whole figure — translate or rotate' : 'Drag the rotation gizmo OR sliders';
+    document.getElementById('rotSec').style.display = joint === 'root' ? 'none' : 'block';
+    document.getElementById('posSec').style.display = joint === 'root' ? 'block' : 'none';
+    setGizmoTarget();
+    updateAllSliders();
+  }
+
+  // Code
+  function fmt(arr) {
+    return '[' + arr.map(v => {
+      const s = Number(v).toFixed(3);
+      return s.replace(/\.000$/, '').replace(/(\.\d{2})0$/, '$1');
+    }).join(', ') + ']';
+  }
+  function poseToCode(p, name) {
+    const lines = [`${name}: {`];
+    lines.push(`  rootPos: ${fmt(p.rootPos)},`);
+    lines.push(`  rootRot: ${fmt(p.rootRot)},`);
+    if (Object.keys(p.bones).length) {
+      lines.push(`  bones: {`);
+      for (const k in p.bones) lines.push(`    ${k}: ${fmt(p.bones[k])},`);
+      lines.push(`  },`);
+    }
+    lines.push(`}`);
+    return lines.join('\n');
+  }
+  function updateCode() {
+    document.getElementById('poseCode').value = poseToCode(live[activeFig],
+      activeFig === 'att' ? 'attacker' : 'opponent');
+  }
+  document.getElementById('copyCode').onclick = async () => {
+    await navigator.clipboard.writeText(document.getElementById('poseCode').value);
+    const b = document.getElementById('copyCode'); const t = b.textContent;
+    b.textContent = 'Copied!'; setTimeout(() => b.textContent = t, 1200);
+  };
+  document.getElementById('logBoth').onclick = () => {
+    console.log('// ' + activeMoveId + ' step ' + (activeStep+1));
+    console.log(poseToCode(live.att,'attacker') + ',');
+    console.log(poseToCode(live.opp,'opponent'));
+  };
+
+  document.getElementById('saveBtn').onclick = () => {
+    const m = window.MOVES.find(x => x.id === activeMoveId);
+    m.steps[activeStep].attacker = {
+      joints: {},
+      rootPos: live.att.rootPos.slice(),
+      rootRot: live.att.rootRot.slice(),
+      bones: JSON.parse(JSON.stringify(live.att.bones)),
+    };
+    m.steps[activeStep].opponent = {
+      joints: {},
+      rootPos: live.opp.rootPos.slice(),
+      rootRot: live.opp.rootRot.slice(),
+      bones: JSON.parse(JSON.stringify(live.opp.bones)),
+    };
+    const btn = document.getElementById('saveBtn'); const t = btn.textContent;
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => btn.textContent = t, 1800);
+  };
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key.toLowerCase() === 'r') setCam('default');
+    if (e.key.toLowerCase() === 'g') document.getElementById('hideGizmo').click();
+    if (e.key === 'Escape') { activeJoint = 'root'; selectJoint(activeFig, 'root'); }
+  });
+
+  function loop() {
+    requestAnimationFrame(loop);
+    orbit.update();
+    if (ik) ik.update();
+    renderer.render(scene, camera);
+  }
+  loop();
+
+  // === Preset grid ===
+  function applyPreset(figName, presetName) {
+    const preset = window.POSE_PRESETS[presetName];
+    if (!preset) return;
+    const fig = figs[figName];
+    // Reset bones first
+    live[figName].bones = {};
+    // Optional root override
+    if (preset.rootPosOverride) live[figName].rootPos = preset.rootPosOverride.slice();
+    if (preset.rootRotOverride) live[figName].rootRot = preset.rootRotOverride.slice();
+    // Apply each delta
+    for (const k in preset.deltas) {
+      if (!fig.restPose[k]) continue;
+      const rq = fig.restPose[k].quaternion;
+      const qRest = new THREE.Quaternion(rq[0], rq[1], rq[2], rq[3]);
+      const qDelta = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(...preset.deltas[k]));
+      const qFinal = qRest.clone().multiply(qDelta);
+      live[figName].bones[k] = [qFinal.x, qFinal.y, qFinal.z, qFinal.w];
+    }
+    applyLive();
+  }
+  const presetGrid = document.getElementById('presetGrid');
+  Object.keys(window.POSE_PRESETS).forEach((name) => {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.title = window.POSE_PRESETS[name].desc || '';
+    b.style.fontSize = '10px';
+    b.style.padding = '6px 4px';
+    b.onclick = () => applyPreset(activeFig, name);
+    presetGrid.appendChild(b);
+  });
+
+  document.getElementById('toggleIK').onclick = () => {
+    if (ik.visible) {
+      ik.hide();
+      document.getElementById('toggleIK').textContent = '⊕ Show IK handles';
+    } else {
+      ik.show();
+      document.getElementById('toggleIK').textContent = '⊖ Hide IK handles';
+    }
+  };
+
+  buildStepBar();
+  loadCurrentStep();
+  selectJoint('att', 'root');
+
+  window.EDIT = { live, figs, selectJoint, applyLive, ik };
+})();
+</script>
+</body>
+</html>

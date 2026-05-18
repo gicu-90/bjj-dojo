@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>FBX probe</title>
+<style>html,body{margin:0;height:100%;background:#0a0c11;color:#e8ebef;font-family:monospace}
+#log{position:fixed;top:0;left:0;right:0;padding:8px;background:rgba(0,0,0,0.6);font-size:11px;max-height:50vh;overflow:auto}
+canvas{position:fixed;inset:0}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div id="log"></div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
+<script>
+const log = (m) => { document.getElementById('log').innerHTML += m + '<br>'; };
+log('three: ' + THREE.REVISION + ' FBXLoader: ' + !!THREE.FBXLoader);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#1a1f2a');
+const cam = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
+cam.position.set(0, 1.5, 4);
+const r = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+function resize() { r.setSize(window.innerWidth, window.innerHeight); cam.aspect = window.innerWidth/window.innerHeight; cam.updateProjectionMatrix(); }
+window.addEventListener('resize', resize); resize();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.8));
+scene.add(new THREE.DirectionalLight(0xffffff, 1).position.set(5, 10, 5));
+const ctl = new THREE.OrbitControls(cam, r.domElement);
+ctl.target.set(0, 1, 0); ctl.update();
+
+const grid = new THREE.GridHelper(10, 10, 0x444, 0x222);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(1));
+
+const url = 'https://files.catbox.moe/9gvb8p.fbx';
+log('loading ' + url);
+const loader = new THREE.FBXLoader();
+loader.load(url, (fbx) => {
+  log('loaded! children: ' + fbx.children.length);
+  let bones = 0, meshes = 0, skinned = 0;
+  fbx.traverse((o) => {
+    if (o.isBone) bones++;
+    if (o.isMesh) meshes++;
+    if (o.isSkinnedMesh) skinned++;
+  });
+  log('bones: ' + bones + ' meshes: ' + meshes + ' skinned: ' + skinned);
+  const bbox = new THREE.Box3().setFromObject(fbx);
+  log('bbox: ' + JSON.stringify({min: bbox.min.toArray().map(n=>n.toFixed(2)), max: bbox.max.toArray().map(n=>n.toFixed(2))}));
+  // Auto-scale to ~1.7m
+  const h = bbox.max.y - bbox.min.y;
+  if (h > 0) {
+    const s = 1.7 / h;
+    fbx.scale.setScalar(s);
+    fbx.position.y -= bbox.min.y * s;
+  }
+  scene.add(fbx);
+  // list bone names
+  const boneNames = [];
+  fbx.traverse((o) => { if (o.isBone) boneNames.push(o.name); });
+  log('bone names: ' + boneNames.slice(0, 30).join(', ') + (boneNames.length > 30 ? '...' : ''));
+  log('total ' + boneNames.length + ' bones');
+  window.FBX = fbx;
+  window.BONES = boneNames;
+}, (p) => {
+  if (p.total) log('progress ' + Math.round(p.loaded / p.total * 100) + '%');
+}, (err) => {
+  log('ERROR: ' + (err.message || err));
+});
+
+function loop() { requestAnimationFrame(loop); r.render(scene, cam); }
+loop();
+</script></body></html>

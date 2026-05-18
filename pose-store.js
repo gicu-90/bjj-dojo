@@ -81,12 +81,22 @@
   // === Persistence ===
   function autosave() {
     if (!window.MOVES) return;
+    const data = JSON.stringify(window.MOVES);
     try {
-      const data = JSON.stringify(window.MOVES);
       localStorage.setItem(STORAGE_KEY, data);
     } catch (e) {
       console.warn('autosave failed', e);
     }
+    // Also persist to disk via the local save-server (writes poses.js, which
+    // IS committed to git). Fire-and-forget: on the deployed GitHub Pages site
+    // there is no /api endpoint, so this fails silently and harmlessly.
+    try {
+      fetch('/api/save-poses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: data,
+      }).catch(() => {});
+    } catch (e) { /* no fetch / offline — localStorage copy still holds */ }
   }
   function loadAutosave() {
     try {

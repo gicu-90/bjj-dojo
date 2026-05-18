@@ -555,8 +555,10 @@
 
   // Try to load autosaved POSE data only — never overwrite captions/hints
   // (those should always come from moves.js source of truth).
+  // poses.js (window.SAVED_POSES) is the committed source of truth and wins;
+  // localStorage is the fallback when editing without the save-server.
   if (window.PoseStore) {
-    const saved = window.PoseStore.loadAutosave();
+    const saved = window.SAVED_POSES || window.PoseStore.loadAutosave();
     if (saved && Array.isArray(saved) && saved.length === window.MOVES.length) {
       window.MOVES.forEach((m, i) => {
         const s = saved.find(x => x.id === m.id);

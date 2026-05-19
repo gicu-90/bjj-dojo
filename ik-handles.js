@@ -11,9 +11,12 @@
 
 (function () {
   function makeHandle(color) {
-    const geo = new THREE.SphereGeometry(0.05, 16, 12);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 });
+    const geo = new THREE.SphereGeometry(0.055, 16, 12);
+    // depthTest off + high renderOrder → handle is always visible and
+    // clickable even when it sits behind a limb.
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false });
     const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 999;
     mesh.userData.isIKHandle = true;
     return mesh;
   }
@@ -111,73 +114,105 @@
       });
     }
 
-    // Drag interaction: use a single TransformControls attached on demand.
-    const gizmo = new THREE.TransformControls(camera, renderer.domElement);
-    gizmo.size = 0.5;
-    gizmo.setMode('translate');
-    scene.add(gizmo);
-    let activeHandle = null;
-    let dragging = false;
-
-    gizmo.addEventListener('dragging-changed', (e) => {
-      orbit.enabled = !e.value;
-      dragging = e.value;
-    });
-    gizmo.addEventListener('change', () => {
-      if (!activeHandle || !dragging) return;
-      const targetPos = activeHandle.position.clone();
-      solveCCD(activeHandle.userData.chain, activeHandle.userData.tip, targetPos, 15);
-    });
-
-    // Raycast clicks on handles to select.
+    // === Direct screen-plane drag ==========================================
+    // Grab a handle sphere and it follows the cursor in the plane that faces
+    // the camera — no axis arrows. Orbit the camera and drag again to reach a
+    // different depth.
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
-    function tryPick(clientX, clientY) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(ndc, camera);
-      const hits = raycaster.intersectObjects(all, false);
-      if (hits[0]) {
-        selectHandle(hits[0].object);
-        return true;
-      }
-      return false;
-    }
-    function selectHandle(h) {
-      activeHandle = h;
-      gizmo.attach(h);
-    }
-    function deselect() {
-      activeHandle = null;
-      gizmo.detach();
+    const dragPlane = new THREE.Plane();
+    const planeHit = new THREE.Vector3();
+    const camDir = new THREE.Vector3();
+    const _w = new THREE.Vector3();
+    let activeHandle = null;
+    let dragging = false;
+    let visible = false;
+
+    const FLOOR_Y = 0;        // mat height
+    const FLOOR_SNAP = 0.09;  // a handle dragged within this of the mat snaps onto it
+    const GRAB_SNAP = 0.20;   // a wrist dragged within this of another joint snaps to grip it
+
+    function setNdc(clientX, clientY) {
+      const r = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+      ndc.y = -((clientY - r.top) / r.height) * 2 + 1;
     }
 
-    let visible = false;
+    // Snap a drag target: never below the mat, near-floor points rest ON it,
+    // and wrists snap onto the other figure's nearest joint (a grip).
+    function snapTarget(handle, target) {
+      if (target.y < FLOOR_Y + FLOOR_SNAP) target.y = FLOOR_Y;
+      const id = handle.userData.handleId;
+      if (id === 'wristL' || id === 'wristR') {
+        let best = null, bestD = GRAB_SNAP;
+        figures.forEach((f) => {
+          if (f === handle.userData.fig) return;   // only the OTHER figure
+          for (const k in f.joints) {
+            if (k === 'root' || k === 'rootBone') continue;
+            f.joints[k].getWorldPosition(_w);
+            const d = _w.distanceTo(target);
+            if (d < bestD) { bestD = d; best = _w.clone(); }
+          }
+        });
+        if (best) target.copy(best);
+      }
+      return target;
+    }
+
+    function onDown(e) {
+      if (!visible) return;
+      setNdc(e.clientX, e.clientY);
+      raycaster.setFromCamera(ndc, camera);
+      const hit = raycaster.intersectObjects(all.filter((h) => h.visible), false)[0];
+      if (!hit) return;
+      activeHandle = hit.object;
+      dragging = true;
+      orbit.enabled = false;
+      camera.getWorldDirection(camDir);
+      dragPlane.setFromNormalAndCoplanarPoint(camDir, activeHandle.position);
+      e.preventDefault();
+    }
+    function onMove(e) {
+      if (!dragging || !activeHandle) return;
+      setNdc(e.clientX, e.clientY);
+      raycaster.setFromCamera(ndc, camera);
+      if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
+      snapTarget(activeHandle, planeHit);
+      activeHandle.position.copy(planeHit);
+      solveCCD(activeHandle.userData.chain, activeHandle.userData.tip, planeHit, 16);
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      activeHandle = null;
+      orbit.enabled = true;
+    }
+    renderer.domElement.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+
     function show() {
       visible = true;
       all.forEach((h) => { h.visible = true; });
-      gizmo.visible = true;
     }
     function hide() {
       visible = false;
+      dragging = false;
+      activeHandle = null;
+      orbit.enabled = true;
       all.forEach((h) => { h.visible = false; });
-      gizmo.visible = false;
-      deselect();
     }
     hide();   // start hidden
 
-    // Animate loop integration
     function update() {
-      if (visible) syncHandles(activeHandle && dragging ? activeHandle : null);
+      if (visible) syncHandles(dragging ? activeHandle : null);
     }
 
     return {
       handles: all,
-      show, hide, update, tryPick, selectHandle, deselect,
+      show, hide, update,
       get visible() { return visible; },
       get activeHandle() { return activeHandle; },
-      onChange(cb) { gizmo.addEventListener('change', cb); },
     };
   }
 

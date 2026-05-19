@@ -94,8 +94,8 @@
       if (!active) return;
       if (!controls.enabled) return;   // dragging gizmo
       if (Math.abs((e.clientX + e.clientY * 1000) - downAt) > 4) return;
-      // In IK mode a click selects an IK handle, not a body joint.
-      if (ik && ik.visible) { ik.tryPick(e.clientX, e.clientY); return; }
+      // In IK mode the IK module owns pointer drags — don't select a joint.
+      if (ik && ik.visible) return;
       const hit = pick(e);
       if (!hit) return;
       const bp = hit.object.userData.bodyPart;

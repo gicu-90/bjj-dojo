@@ -56,22 +56,44 @@
     }
   }
 
+  // One draggable handle per joint. `chain` lists the bones (root-first) that
+  // CCD rotates so the joint (`tip`) reaches the dragged target. Colours:
+  // arms cyan, legs orange, spine/head green.
+  const ARM = 0x4fc3f7, LEG = 0xffb74d, CORE = 0x81c784;
+  const HANDLE_DEFS = [
+    // arms
+    { id: 'shoulderL', color: ARM, tip: 'shoulderL', chain: ['spine', 'chest'] },
+    { id: 'elbowL', color: ARM, tip: 'elbowL', chain: ['shoulderL'] },
+    { id: 'wristL', color: ARM, tip: 'wristL', chain: ['shoulderL', 'elbowL'] },
+    { id: 'shoulderR', color: ARM, tip: 'shoulderR', chain: ['spine', 'chest'] },
+    { id: 'elbowR', color: ARM, tip: 'elbowR', chain: ['shoulderR'] },
+    { id: 'wristR', color: ARM, tip: 'wristR', chain: ['shoulderR', 'elbowR'] },
+    // legs
+    { id: 'hipL', color: LEG, tip: 'hipL', chain: ['spine'] },
+    { id: 'kneeL', color: LEG, tip: 'kneeL', chain: ['hipL'] },
+    { id: 'ankleL', color: LEG, tip: 'ankleL', chain: ['hipL', 'kneeL'] },
+    { id: 'hipR', color: LEG, tip: 'hipR', chain: ['spine'] },
+    { id: 'kneeR', color: LEG, tip: 'kneeR', chain: ['hipR'] },
+    { id: 'ankleR', color: LEG, tip: 'ankleR', chain: ['hipR', 'kneeR'] },
+    // spine / head
+    { id: 'chest', color: CORE, tip: 'chest', chain: ['spine'] },
+    { id: 'neck', color: CORE, tip: 'neck', chain: ['spine', 'chest'] },
+    { id: 'head', color: CORE, tip: 'head', chain: ['spine', 'chest', 'neck'] },
+  ];
+
   function createIKHandles(scene, camera, renderer, figures, orbit) {
-    // Per-figure handle objects: { wristL, wristR, ankleL, ankleR }
+    // Per-figure handle objects keyed by joint id.
     const all = [];
     figures.forEach((fig) => {
       const figHandles = {};
-      [
-        { id: 'wristL', color: 0x4fc3f7, chain: ['shoulderL', 'elbowL'], tip: 'wristL' },
-        { id: 'wristR', color: 0x4fc3f7, chain: ['shoulderR', 'elbowR'], tip: 'wristR' },
-        { id: 'ankleL', color: 0xffb74d, chain: ['hipL', 'kneeL'], tip: 'ankleL' },
-        { id: 'ankleR', color: 0xffb74d, chain: ['hipR', 'kneeR'], tip: 'ankleR' },
-      ].forEach((cfg) => {
+      HANDLE_DEFS.forEach((cfg) => {
         if (!fig.joints[cfg.tip]) return;
+        const chain = cfg.chain.map((k) => fig.joints[k]).filter(Boolean);
+        if (!chain.length) return;   // no rotatable ancestors → can't IK it
         const handle = makeHandle(cfg.color);
         handle.userData.figName = fig.root.name;
         handle.userData.handleId = cfg.id;
-        handle.userData.chain = cfg.chain.map((k) => fig.joints[k]);
+        handle.userData.chain = chain;
         handle.userData.tip = fig.joints[cfg.tip];
         handle.userData.fig = fig;
         scene.add(handle);

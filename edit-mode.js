@@ -215,7 +215,7 @@
       if (ik.visible) {
         ik.hide();
         ikBtn.classList.remove('on');
-        ikBtn.textContent = '⊕ IK drag (hands & feet)';
+        ikBtn.textContent = '⊕ IK drag (any joint)';
         setGizmoTarget();              // restore the joint-rotation gizmo
       } else {
         ik.show();
@@ -334,7 +334,7 @@
         gizmo.visible = false;
         if (ik && ik.visible) {
           ik.hide();
-          if (ikBtn) { ikBtn.classList.remove('on'); ikBtn.textContent = '⊕ IK drag (hands & feet)'; }
+          if (ikBtn) { ikBtn.classList.remove('on'); ikBtn.textContent = '⊕ IK drag (any joint)'; }
         }
       }
     }

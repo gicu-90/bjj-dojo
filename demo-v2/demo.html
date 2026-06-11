@@ -1,0 +1,410 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>BJJ Dojo — professional 3D character track PoC</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0c11;overflow:hidden;font-family:system-ui,sans-serif}
+  canvas{display:block}
+  #caption{position:fixed;left:0;right:0;bottom:0;padding:10px 16px;background:rgba(10,12,17,.82);
+    color:#cfd8ea;font-size:14px;line-height:1.4;border-top:1px solid #2c3550;z-index:5}
+  #caption b{color:#fff}
+  #controls{position:fixed;top:12px;left:12px;z-index:5;display:flex;gap:8px}
+  #controls button{background:#2c3550;color:#e6ecff;border:1px solid #4a5a8a;border-radius:6px;
+    padding:8px 14px;font-size:14px;cursor:pointer}
+  #controls button:hover{background:#3a4a73}
+  .viewlabel{position:fixed;color:#7d8fb3;font-size:12px;z-index:4;pointer-events:none}
+</style>
+<script type="importmap">{"imports":{
+  "three":"./vendor/three.module.js",
+  "three/addons/":"./vendor/addons/"}}</script>
+<!-- three.js 0.160 vendored locally (unpkg mirror of the CDN files) — the demo runs offline -->
+
+</head><body>
+<div id="controls">
+  <button id="btnStance">Reset: Fight Stance</button>
+  <button id="btnRnc">Play: Back Control</button>
+</div>
+<div id="caption">loading…</div>
+<script>
+  window.addEventListener('error', e => {
+    document.getElementById('caption').textContent = 'ERROR: ' + (e.message || e.type) + ' @ ' + (e.filename || '') + ':' + (e.lineno || '');
+  }, true);
+  window.addEventListener('unhandledrejection', e => {
+    document.getElementById('caption').textContent = 'REJECTION: ' + (e.reason && (e.reason.stack || e.reason.message || e.reason));
+  });
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+const dbg = m => { document.getElementById('caption').textContent = m; };
+dbg('imports ok');
+
+// Headless-screenshot support (?shot): Chromium's --virtual-time-budget races ahead of
+// off-thread texture decode, snapshotting before the GLTF appears. A continuous chain of
+// pending fetches pins virtual time near zero until we've actually rendered some frames.
+let renderedFrames = 0;
+if (new URLSearchParams(location.search).has('shot')) {
+  (async () => {
+    while (renderedFrames < 10) { try { await fetch('ping?' + Math.random()); } catch {} }
+  })();
+}
+
+const PI = Math.PI;
+const params = new URLSearchParams(location.search);
+const LAB = params.has('lab');
+const START_POSE = params.get('pose') || 'stance';
+
+/* ============================================================
+ * Pose data — canonical 17-joint format (posing-and-grappling.md)
+ * ============================================================ */
+const REST = { spine:[0,0,0], chest:[0,0,0], neck:[0,0,0], head:[0,0,0],
+  shoulderL:[0,0,0.14], shoulderR:[0,0,-0.14], elbowL:[-0.1,0,0], elbowR:[-0.1,0,0],
+  wristL:[0,0,0], wristR:[0,0,0], hipL:[0,0,0.04], hipR:[0,0,-0.04],
+  kneeL:[0.05,0,0], kneeR:[0.05,0,0], ankleL:[0,0,0], ankleR:[0,0,0] };
+const P = (overrides = {}, rootPos = [0, 0.93, 0], rootRot = [0, 0, 0]) =>
+  ({ joints: { ...REST, ...overrides }, rootPos, rootRot });
+
+// Verified fight stance (chin-height guard −1.1/−2.2, bladed, staggered,
+// ankle counter-rotation ankle.x ≈ −(hip.x + knee.x), root dropped for bent knees).
+const fightStance = (rootPos, rootRot) => P({
+  spine:[0.08,0,0], chest:[0.05,0.2,0], neck:[-0.05,0,0], head:[-0.1,0,0],
+  shoulderL:[-1.1,0,0.2], elbowL:[-2.2,0,0.15], shoulderR:[-1.1,0,-0.2], elbowR:[-2.2,0,-0.15],
+  hipL:[-0.35,0,0.08], kneeL:[0.65,0,0], hipR:[-0.15,0,-0.08], kneeR:[0.55,0,0],
+  ankleL:[-0.30,0,0], ankleR:[-0.40,0,0],
+}, rootPos, rootRot);
+
+// Back control / RNC, both seated facing +X, attacker behind (starter values from
+// posing-and-grappling.md, tuned on this GLB rig by screenshot audit).
+// Opponent first (receiving body), then attacker root placed by torso distance, then wraps.
+const FACE_POS_X = [0, PI/2, 0];
+const rncOpponent = () => P({
+  spine:[0.10,0,0], chest:[0.05,0,0], neck:[-0.25,0,0], head:[-0.15,0,0], // back against attacker's chest, chin lifted by the choke
+  // hands gripping the choking forearm at the neck (elbows tucked, fists at the clavicle)
+  shoulderL:[-0.35,0,0.30], elbowL:[-1.75,0,0.25], wristL:[0,0,0.5],
+  shoulderR:[-0.35,0,-0.30], elbowR:[-1.75,0,-0.25], wristR:[0,0,-0.5],
+  // seated on the attacker's lap: knees up, heels tucked near the butt ON the mat
+  // (knee.x ~2.25 keeps the heel at y~0 — smaller values put the foot under the floor)
+  hipL:[-1.50,0,0.22], kneeL:[2.32,0,0], ankleL:[0.20,0,0],
+  hipR:[-1.40,0,-0.22], kneeR:[2.25,0,0], ankleR:[0.25,0,0],
+}, [0.08, 0.27, 0], FACE_POS_X);
+const rncAttacker = () => P({
+  spine:[0.30,0,0], chest:[0.20,0,0], neck:[0.20,0,-0.30], head:[0.25,0,-0.15], // chest to back, head beside opponent's (tilted to the choking side)
+  // arms IK-solved in canonical space (tools/solve-rnc-arms.mjs) so the wrists land
+  // ON the opponent's throat/neck anchors (<2 cm miss), then baked here as plain data:
+  // right forearm crosses the throat, left wraps over the left shoulder to the neck
+  shoulderR:[-1.58,1.47,-0.40], elbowR:[-1.08,0,0], wristR:[0,0,-0.4],
+  shoulderL:[0.12,-1.28,2.35], elbowL:[-1.16,0,0], wristL:[0,0,0.4],
+  // hooks: thighs up over the opponent's thighs, feet hooking his inner knees
+  // (ankle target ~(0.51, 0.15, ±0.25) world — feet stay OFF the mat in back control)
+  hipL:[-1.90,0,0.30], kneeL:[0.70,0,0], ankleL:[-0.40,0,0],
+  hipR:[-1.80,0,-0.30], kneeR:[0.70,0,0], ankleR:[-0.40,0,0],
+}, [-0.30, 0.16, 0], FACE_POS_X);
+
+const SCENES = {
+  rest: { // debug: canonical rest (arms hanging), both facing camera
+    caption: 'DEBUG — canonical REST pose (arms should hang at the sides, slight elbow bend).',
+    blue: () => P({}, [-0.62, 0.93, 0], [0, 0, 0]),
+    red:  () => P({}, [ 0.62, 0.93, 0], [0, 0, 0]),
+  },
+  arms: { // debug: guard arms only, facing camera
+    caption: 'DEBUG — guard arms only (shoulder −1.1 / elbow −2.2): fists at chin height, in FRONT.',
+    blue: () => P({ shoulderL:[-1.1,0,0.2], elbowL:[-2.2,0,0.15], shoulderR:[-1.1,0,-0.2], elbowR:[-2.2,0,-0.15] }, [-0.62, 0.93, 0], [0, 0, 0]),
+    red:  () => P({ shoulderL:[-1.1,0,0.2], elbowL:[-2.2,0,0.15], shoulderR:[-1.1,0,-0.2], elbowR:[-2.2,0,-0.15] }, [ 0.62, 0.93, 0], [0, 0, 0]),
+  },
+  stance: {
+    caption: '<b>Scene 1 — Fight stance.</b> Two Quaternius Universal Base Characters (CC0, rigged GLTF), ' +
+      'tinted blue/red, posed via the canonical 17-joint pose data retargeted onto the UE-style skeleton ' +
+      'as rest-pose deltas. Guard at chin height (shoulder −1.1 / elbow −2.2), bladed, staggered, ankles counter-rotated.',
+    blue: () => fightStance([-0.62, 0.90, 0], [0,  PI/2, 0]),  // faces +X
+    red:  () => fightStance([ 0.62, 0.90, 0], [0, -PI/2, 0]),  // faces -X
+    fists: [1, 1],
+  },
+  rnc: {
+    caption: '<b>Scene 2 — Back control (rear-naked-choke position).</b> Blue behind Red, chest to back, ' +
+      'right arm wrapping the neck, left arm over the shoulder, leg hooks inside the thighs. ' +
+      'Authored receiving-body-first, attacker root placed by torso distance, arms wrapped to contact.',
+    blue: rncAttacker,
+    red:  rncOpponent,
+    fists: [0.5, 0.8], // attacker semi-grip, opponent gripping the choking arm
+  },
+};
+
+/* ============================================================
+ * Retargeting — canonical joints -> Quaternius/UE skeleton
+ * ============================================================
+ * BONE_MAP per professional-assets.md (suffix matching). This rig uses
+ * UE-mannequin names, not Mixamo — map adjusted accordingly.
+ */
+const BONE_MAP = { // canonical -> bone-name suffix on this rig
+  root: 'pelvis', spine: 'spine_01', chest: 'spine_03', neck: 'neck_01', head: 'Head',
+  shoulderL: 'upperarm_l', elbowL: 'lowerarm_l', wristL: 'hand_l',
+  shoulderR: 'upperarm_r', elbowR: 'lowerarm_r', wristR: 'hand_r',
+  hipL: 'thigh_l', kneeL: 'calf_l', ankleL: 'foot_l',
+  hipR: 'thigh_r', kneeR: 'calf_r', ankleR: 'foot_r',
+};
+function bindRig(model) {
+  const joints = {};
+  model.traverse(o => { if (o.isBone) for (const [k, n] of Object.entries(BONE_MAP))
+    if (o.name.endsWith(n)) joints[k] = o; });
+  return joints;
+}
+
+// Canonical hierarchy (for composing world-space rotations exactly like the capsule rig).
+const PARENT = { spine:'root', chest:'spine', neck:'chest', head:'neck',
+  shoulderL:'chest', elbowL:'shoulderL', wristL:'elbowL',
+  shoulderR:'chest', elbowR:'shoulderR', wristR:'elbowR',
+  hipL:'root', kneeL:'hipL', ankleL:'kneeL', hipR:'root', kneeR:'hipR', ankleR:'kneeR' };
+const JOINT_ORDER = ['spine','chest','neck','head',
+  'shoulderL','elbowL','wristL','shoulderR','elbowR','wristR',
+  'hipL','kneeL','ankleL','hipR','kneeR','ankleR'];
+
+/* CORRECTION MAP (the per-joint axis/sign tuning the skill warns about).
+ * This rig is a T-pose (arms straight out along ±X); the canonical rest is arms-down.
+ * Each entry is a world-space alignment quaternion composed between the canonical
+ * delta and the bone's captured rest orientation. The arm chains need a ∓90° roll
+ * about Z to bring the T-pose arm down to the canonical hanging rest; everything
+ * else matched the canonical axes directly (verified by screenshot audit).
+ */
+const ALIGN = (() => {
+  const q = (x, y, z, a) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(x, y, z), a);
+  const armL = q(0, 0, 1, -PI / 2);   // +X arm -> hanging -Y
+  const armR = q(0, 0, 1,  PI / 2);   // -X arm -> hanging -Y
+  const none = new THREE.Quaternion();
+  return { spine:none, chest:none, neck:none, head:none,
+    shoulderL:armL, elbowL:armL, wristL:armL,
+    shoulderR:armR, elbowR:armR, wristR:armR,
+    hipL:none, kneeL:none, ankleL:none, hipR:none, kneeR:none, ankleR:none };
+})();
+
+/* ============================================================
+ * Fighter wrapper — load once, SkeletonUtils.clone per instance
+ * ============================================================ */
+function makeFighter(srcScene, tint) {
+  const model = SkeletonUtils.clone(srcScene);       // NEVER naive .clone on skinned meshes
+  model.traverse(o => {
+    if (o.isMesh || o.isSkinnedMesh) {
+      o.castShadow = true; o.frustumCulled = false;
+      o.material = o.material.clone();               // never share materials across fighters
+      if (o.material.name.includes('Superhero')) {   // tint the suit, keep eyes/hair
+        o.material.color.set(tint);
+      }
+    }
+  });
+
+  // Canonical root sits AT the hips: wrap the model so rootGroup origin == pelvis rest position.
+  const bones = bindRig(model);
+  const fingers = [];
+  model.traverse(o => { if (o.isBone && /(index|middle|ring|pinky|thumb)_0[123]_[lr]$/.test(o.name))
+    fingers.push({ bone: o, rest: o.quaternion.clone(), thumb: o.name.startsWith('thumb'), side: o.name.at(-1) }); });
+  const pelvisRest = new THREE.Vector3();
+  model.updateWorldMatrix(true, true);
+  bones.root.getWorldPosition(pelvisRest);
+  const rootGroup = new THREE.Group();
+  const inner = new THREE.Group();
+  inner.position.copy(pelvisRest).negate();
+  inner.add(model);
+  rootGroup.add(inner);
+
+  // Capture rest-pose quaternions after load (world orientation, model unrotated),
+  // then pre-compose the alignment correction: B[j] = ALIGN[j] * restWorldQ[j].
+  const B = {};
+  for (const j of JOINT_ORDER) {
+    const restWorldQ = bones[j].getWorldQuaternion(new THREE.Quaternion());
+    B[j] = ALIGN[j].clone().multiply(restWorldQ);
+  }
+  return { rootGroup, bones, B, fingers };
+}
+
+// Curl the fingers into a fist (0 = open rest hand, 1 = closed). Axis on this rig
+// determined empirically via the ?fist debug param: see CORRECTION notes in README.
+const FIST_AXIS = new THREE.Vector3(1, 0, 0); let FIST_SIGN = 1; // local +X curls (probed: ?fist=x:1)
+if (params.has('fist')) { // e.g. ?fist=x:-1 — override for axis hunting
+  const [ax, sg] = params.get('fist').split(':');
+  FIST_AXIS.set(ax === 'x' ? 1 : 0, ax === 'y' ? 1 : 0, ax === 'z' ? 1 : 0);
+  FIST_SIGN = Number(sg) || 1;
+}
+const _fq = new THREE.Quaternion();
+function applyFist(f, amount) {
+  for (const { bone, rest, thumb, side } of f.fingers) {
+    const a = (thumb ? 0.4 : 1.25) * amount * FIST_SIGN * (side === 'r' ? -1 : 1);
+    bone.quaternion.copy(rest).multiply(_fq.setFromAxisAngle(FIST_AXIS, a));
+  }
+}
+
+/* ============================================================
+ * Pose application — canonical deltas on top of captured rest
+ * ============================================================
+ * W[j] = W[parent] * eulerQuat(j) composes the pose exactly as the canonical
+ * capsule rig would; each bone is then driven to the absolute world target
+ * W[j] * B[j]  (i.e. rest-pose quaternion premultiplied by the corrected delta).
+ */
+const _e = new THREE.Euler(), _q = new THREE.Quaternion(), _pq = new THREE.Quaternion();
+function poseToQuats(pose) {
+  const out = {};
+  for (const j of JOINT_ORDER) {
+    const a = pose.joints[j] || [0, 0, 0];
+    out[j] = new THREE.Quaternion().setFromEuler(_e.set(a[0], a[1], a[2], 'XYZ'));
+  }
+  out.rootPos = new THREE.Vector3(...pose.rootPos);
+  out.rootQ = new THREE.Quaternion().setFromEuler(_e.set(...pose.rootRot, 'XYZ'));
+  return out;
+}
+function applyQuatPose(f, qp) {
+  f.rootGroup.position.copy(qp.rootPos);
+  f.rootGroup.quaternion.copy(qp.rootQ);
+  const W = { root: qp.rootQ };
+  for (const j of JOINT_ORDER) W[j] = W[PARENT[j]].clone().multiply(qp[j]);
+  for (const j of JOINT_ORDER) {
+    const bone = f.bones[j];
+    bone.parent.updateWorldMatrix(true, false);
+    _pq.setFromRotationMatrix(bone.parent.matrixWorld).invert();
+    bone.quaternion.copy(_pq).multiply(_q.copy(W[j]).multiply(f.B[j])); // rest * corrected delta
+  }
+}
+// Tween between two quat-poses: quaternion slerp + cubic ease (animation.md)
+const easeInOut = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+function mixQuatPose(A, Bp, t) {
+  const k = easeInOut(Math.min(Math.max(t, 0), 1));
+  const out = {};
+  for (const j of JOINT_ORDER) out[j] = A[j].clone().slerp(Bp[j], k);
+  out.rootPos = A.rootPos.clone().lerp(Bp.rootPos, k);
+  out.rootQ = A.rootQ.clone().slerp(Bp.rootQ, k);
+  return out;
+}
+
+/* ============================================================
+ * Scene — the 4-light dojo mat recipe (fighter-factory.md)
+ * ============================================================ */
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c11);
+scene.fog = new THREE.Fog(0x0a0c11, 8, 18);
+// ?bright lifts the ambient for pose auditing (screenshots); hero look keeps the moody 0.55
+scene.add(new THREE.HemisphereLight(0x7d8fb3, 0x1c1c22, params.has('bright') ? 1.6 : 0.55));
+const key = new THREE.DirectionalLight(0xfff1de, 1.6); key.position.set(3, 6, 4);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004;
+key.shadow.camera.left = key.shadow.camera.bottom = -4; key.shadow.camera.right = key.shadow.camera.top = 4;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x5d79ff, 0.35); fill.position.set(-4, 2, -1); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xbcd6ff, 0.9); rim.position.set(0, 3.5, -6); scene.add(rim);
+const mat = new THREE.Mesh(new THREE.CircleGeometry(3.4, 48),
+  new THREE.MeshStandardMaterial({ color: 0x191e27, roughness: 0.95 }));
+mat.rotation.x = -PI / 2; mat.receiveShadow = true; scene.add(mat);
+const ring = new THREE.Mesh(new THREE.RingGeometry(2.9, 2.96, 64),
+  new THREE.MeshBasicMaterial({ color: 0x2c3550 }));
+ring.rotation.x = -PI / 2; ring.position.y = 0.002; scene.add(ring);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 50);
+camera.position.set(2.4, 1.5, 3.2);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.7, 0); controls.enableDamping = true;
+
+// Lab mode views (animation.md Pose Lab)
+const LAB_VIEWS = [
+  { name: 'front', pos: [0, 1.2, 4.2] },
+  { name: 'side',  pos: [4.2, 1.2, 0] },
+  { name: 'top',   pos: [0, 5.0, 0.01] },
+];
+if (LAB) {
+  document.getElementById('controls').style.display = 'none';
+  LAB_VIEWS.forEach((v, i) => {
+    const el = document.createElement('div');
+    el.className = 'viewlabel'; el.textContent = v.name;
+    el.style.left = `${(i / LAB_VIEWS.length) * 100 + 1}%`; el.style.top = '8px';
+    document.body.appendChild(el);
+  });
+}
+
+/* ============================================================
+ * Load, instantiate, run
+ * ============================================================ */
+dbg('renderer ok, loading gltf…');
+const gltf = await new GLTFLoader().loadAsync('assets/Superhero_Male_FullBody.gltf');
+dbg('gltf loaded');
+// 0x4fc3f7 (skill default) renders GREEN over this model's brown basecolor texture —
+// the tint multiplies the map, so blue needs a low green channel: 0x4466ff reads blue.
+const blue = makeFighter(gltf.scene, 0x5580ff);
+const red  = makeFighter(gltf.scene, 0xef5350);
+scene.add(blue.rootGroup, red.rootGroup);
+
+const captionEl = document.getElementById('caption');
+let current = { blue: poseToQuats(SCENES.stance.blue()), red: poseToQuats(SCENES.stance.red()) };
+let tween = null; // { fromB, toB, fromR, toR, t, dur }
+let currentScene = 'stance';
+
+function showScene(name, instant) {
+  const s = SCENES[name];
+  currentScene = name;
+  captionEl.innerHTML = s.caption;
+  const toB = poseToQuats(s.blue()), toR = poseToQuats(s.red());
+  if (instant) { current = { blue: toB, red: toR }; tween = null; }
+  else tween = { fromB: current.blue, toB, fromR: current.red, toR, t: 0, dur: 1.2 };
+}
+document.getElementById('btnStance').onclick = () => showScene('stance', false);
+document.getElementById('btnRnc').onclick = () => showScene('rnc', false);
+
+showScene(SCENES[START_POSE] ? START_POSE : 'stance', true);
+
+// ?scrub=0.5 — render the stance->back-control tween frozen at t (verifies the exact
+// path the "Play: Back Control" button animates through, deterministically for screenshots)
+const SCRUB = params.has('scrub') ? Number(params.get('scrub')) : null;
+if (SCRUB !== null) {
+  showScene('stance', true);
+  tween = { fromB: current.blue, toB: poseToQuats(SCENES.rnc.blue()),
+            fromR: current.red, toR: poseToQuats(SCENES.rnc.red()), t: 0, dur: 1.2 };
+  captionEl.innerHTML = `<b>Tween check</b> — stance → back control frozen at t=${SCRUB} (the Play button path).`;
+}
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (tween) {
+    tween.t = SCRUB !== null ? SCRUB : Math.min(1, tween.t + dt / tween.dur);
+    current = { blue: mixQuatPose(tween.fromB, tween.toB, tween.t),
+                red:  mixQuatPose(tween.fromR, tween.toR, tween.t) };
+    if (tween.t >= 1) tween = null;
+  }
+  applyQuatPose(blue, current.blue);
+  applyQuatPose(red, current.red);
+  const fists = params.has('fist') ? [1, 1] : (SCENES[currentScene].fists || [0, 0]);
+  applyFist(blue, fists[0]); applyFist(red, fists[1]);
+  renderedFrames++;
+  if (renderedFrames === 5 && params.has('dump')) { // debug: joint world positions -> server log
+    const v = new THREE.Vector3();
+    for (const [label, f] of [['BLUE', blue], ['RED', red]]) {
+      const rows = JOINT_ORDER.map(j => {
+        f.bones[j].getWorldPosition(v);
+        return `${j}:${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`;
+      });
+      fetch(`dump-${label}?${rows.join('|')}`).catch(() => {});
+    }
+  }
+
+  if (!LAB) {
+    controls.update();
+    renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
+    renderer.render(scene, camera);
+  } else {
+    const W = renderer.domElement.width, H = renderer.domElement.height, cw = W / LAB_VIEWS.length;
+    renderer.setScissorTest(true);
+    LAB_VIEWS.forEach((v, c) => {
+      const cam = new THREE.PerspectiveCamera(38, cw / H, 0.1, 50);
+      cam.position.set(...v.pos); cam.lookAt(0, v.name === 'top' ? 0 : 0.7, 0);
+      renderer.setViewport(c * cw, 0, cw, H); renderer.setScissor(c * cw, 0, cw, H);
+      renderer.render(scene, cam);
+    });
+    renderer.setScissorTest(false);
+  }
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script></body></html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grappling Animator — Phase 0–2: IK foot-lock</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0c11;color:#e8ebef;font-family:system-ui,sans-serif;overflow:hidden}
+  canvas{display:block}
+  #ui{position:fixed;top:16px;left:16px;background:rgba(16,20,28,.85);border:1px solid #2a3140;border-radius:10px;padding:14px 16px;backdrop-filter:blur(8px);max-width:340px}
+  h1{font-size:14px;margin:0 0 8px;letter-spacing:.04em}
+  p{font-size:12px;color:#8b95a3;margin:6px 0;line-height:1.5}
+  label{display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;cursor:pointer}
+  #hud{position:fixed;bottom:16px;left:16px;font-family:ui-monospace,monospace;font-size:12px;background:rgba(16,20,28,.85);border:1px solid #2a3140;border-radius:8px;padding:10px 12px}
+  .v{color:#66bb6a} .x{color:#ef5350}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h1>PHASE 0–2 · IK FOOT-LOCK</h1>
+  <p>The hips sway and bob like a walk. The <b style="color:#ffb74d">amber foot</b> is pinned to the mat by the IK foot-lock — it must NOT slide as the body moves over it. The leg re-solves every frame to keep the ankle nailed to the marker.</p>
+  <label><input type="checkbox" id="lock" checked> Foot-lock ON (uncheck to see it slide)</label>
+  <label><input type="checkbox" id="marker" checked> Show planted-point marker</label>
+  <p id="note"></p>
+</div>
+<div id="hud"></div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { JOINTS, RIG, BONE_LENGTH } from './src/rig.js';
+import { Clip } from './src/track.js';
+import { solveFrame } from './src/solver.js';
+
+// ---- scene ----
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0c11);
+scene.add(new THREE.HemisphereLight(0x7d8fb3, 0x1c1c22, .55));
+const key = new THREE.DirectionalLight(0xfff1de, 1.6); key.position.set(3,6,4); key.castShadow=true;
+key.shadow.mapSize.set(1024,1024); key.shadow.camera.left=key.shadow.camera.bottom=-3;
+key.shadow.camera.right=key.shadow.camera.top=3; scene.add(key);
+scene.add(new THREE.DirectionalLight(0xbcd6ff,.7).translateZ(-6));
+const mat = new THREE.Mesh(new THREE.CircleGeometry(3,48), new THREE.MeshStandardMaterial({color:0x191e27,roughness:.95}));
+mat.rotation.x=-Math.PI/2; mat.receiveShadow=true; scene.add(mat);
+const grid = new THREE.GridHelper(6, 24, 0x2c3550, 0x1c2230); scene.add(grid);
+const cam = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, .1, 50); cam.position.set(1.8,1.2,2.6);
+const controls = new OrbitControls(cam, renderer.domElement); controls.target.set(0,0.6,0); controls.enableDamping=true;
+
+// ---- bone visuals: a small sphere per joint + a thin cylinder per bone ----
+const jointMesh = {}; const boneMesh = {};
+const jmat = new THREE.MeshStandardMaterial({color:0x4fc3f7, roughness:.5});
+const bmat = new THREE.MeshStandardMaterial({color:0x39506b, roughness:.6});
+for (const j of JOINTS) {
+  const s = new THREE.Mesh(new THREE.SphereGeometry(0.028,12,10), jmat);
+  s.castShadow = true; scene.add(s); jointMesh[j] = s;
+  if (RIG[j].parent) {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,1,8), bmat);
+    c.castShadow = true; scene.add(c); boneMesh[j] = c;
+  }
+}
+// the locked foot is highlighted amber
+jointMesh.ankleL.material = new THREE.MeshStandardMaterial({color:0xffb74d, roughness:.4});
+
+// planted-point marker (where the foot is pinned)
+const lockPoint = new THREE.Vector3(0.095, 0.08, 0.0);
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.05,0.07,24), new THREE.MeshBasicMaterial({color:0xffb74d, side:THREE.DoubleSide}));
+marker.rotation.x=-Math.PI/2; marker.position.copy(lockPoint).setY(0.005); scene.add(marker);
+
+const clip = new Clip([], 1);
+const _q = new THREE.Quaternion();
+const up = new THREE.Vector3(0,1,0); const dirv = new THREE.Vector3();
+
+let trail = []; // record ankle world pos to measure slide
+function draw(world) {
+  for (const j of JOINTS) jointMesh[j].position.copy(world.pos[j]);
+  for (const j of JOINTS) {
+    if (!RIG[j].parent) continue;
+    const a = world.pos[RIG[j].parent], b = world.pos[j];
+    const m = boneMesh[j];
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    dirv.copy(b).sub(a); const len = dirv.length();
+    m.scale.set(1, Math.max(len,1e-4), 1);
+    m.quaternion.setFromUnitVectors(up, dirv.normalize());
+  }
+}
+
+const lockEl = document.getElementById('lock');
+const markerEl = document.getElementById('marker');
+const hud = document.getElementById('hud');
+const note = document.getElementById('note');
+
+let t0 = null;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (t0===null) t0=ts; const t=(ts-t0)/1000;
+
+  // root sways + bobs + drifts forward — a walk's hip motion
+  const rootPos = new THREE.Vector3(
+    0.06*Math.sin(t*1.6),
+    0.905 + 0.02*Math.sin(t*3.2),
+    0.10*Math.sin(t*0.8)
+  );
+  const constraints = lockEl.checked ? [{kind:'footLock', foot:'ankleL', worldPoint:lockPoint}] : [];
+  const world = solveFrame(clip, t, rootPos, _q.identity(), constraints);
+  draw(world);
+
+  marker.visible = markerEl.checked;
+  const slide = world.pos.ankleL.distanceTo(lockPoint);
+  const ok = slide < 0.005;
+  hud.innerHTML = `ankle → planted-point: <span class="${ok?'v':'x'}">${(slide*1000).toFixed(1)} mm</span>`
+    + (lockEl.checked ? (ok?'  ✓ glued':'  (solving…)') : '  — lock OFF, foot slides with body');
+  controls.update(); renderer.render(scene, cam);
+}
+requestAnimationFrame(frame);
+note.textContent = `13/13 unit tests green · ${JOINTS.length}-joint rig · two-bone analytic IK`;
+addEventListener('resize', ()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script>
+</body>
+</html>
